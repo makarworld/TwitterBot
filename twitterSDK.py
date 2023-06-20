@@ -2,6 +2,7 @@ import base64
 from typing import *
 import requests
 import urllib3
+from urllib3.exceptions import ProtocolError
 from loguru import logger
 import pyuseragents 
 import random
@@ -113,7 +114,12 @@ class TwitterSDK:
 
     def call(self, method, url, return_value: Union[None, str] = None, **kwargs) -> requests.Response:
         logger.debug(f"REQUEST | {method} {url} {kwargs}")
-        req = self.session.request(method, url, verify=False, **kwargs)
+        try:
+            req = self.session.request(method, url, verify=False, **kwargs)
+        except (ConnectionResetError, ProtocolError, requests.exceptions.ConnectionError) as e:
+            logger._error(f"{e} -> {self.cookies}")
+            return {"errors": [{"message": "ConnectionResetError"}]}
+
         logger.debug(f"RESPONSE | {req.content}")
 
         try:
@@ -149,7 +155,7 @@ class TwitterSDK:
                         include_country_code = True,
                         include_ext_dm_nsfw_media_filter = True,
                         include_ext_sharing_audiospaces_listening_data_with_followers = True
-        )).json()
+        ), return_value = 'json')
 
         if r.get('errors'):
             return None

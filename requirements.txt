@@ -3,3 +3,4 @@ requests==2.28.1
 urllib3==1.26.8
 loguru==0.6.0
 pywebio==1.7.1
+PyYAML==6.0

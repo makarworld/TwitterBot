@@ -6,7 +6,7 @@
 
 1. Открываем в папке проекта консоль
 2. pip install -r requirements.txt
-3. python gui.py
+3. python main.py
 
 В `cookies.txt` вставляем куки от аккаунта, 
 поддерживаемый формат: 

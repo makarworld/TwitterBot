@@ -1,3 +1,9 @@
 # http / https / socks4 / socks5
 proxy_type: http
 port: 8081
+
+random_wait:
+  init_min: 1
+  init_max: 20
+  between_min: 30
+  between_max: 40

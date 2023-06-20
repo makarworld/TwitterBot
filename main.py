@@ -1,8 +1,9 @@
 import json
 import os
+import random
 import time
 from pywebio import start_server
-from pywebio.pin import put_input, put_textarea, pin_on_change, put_select, pin
+from pywebio.pin import put_input, put_textarea, pin_on_change, put_select, pin_update, pin
 from pywebio.output import *
 from typing import *
 import threading
@@ -69,8 +70,8 @@ logger.success = success
 logger.error = error
 logger.warning = warning
 
-def load_yaml(file_path):
-    with open(file_path, 'r') as f:
+def load_yaml():
+    with open('settings.yaml', 'r') as f:
         return yaml.safe_load(f)
 
 def is_port_avaliable(port: int):
@@ -94,15 +95,18 @@ class ProgramManager():
     def init(self):
         self.accounts: List[TwitterSDK] = []
         self.all_accounts_loaded = False
-
-    def load_accounts(self):
-        
-        with open('cookies.txt', 'r') as f:
-            cookies = [x.strip() for x in f.readlines() if x.strip()]
-        
+    
+    def get_raw_proxies(self):
         with open('proxies.txt', 'r') as f:
             raw_proxies = [x.strip() for x in f.readlines() if x.strip()]
-        
+        return raw_proxies
+    
+    def get_raw_cookies(self):
+        with open('proxies.txt', 'r') as f:
+            raw_proxies = [x.strip() for x in f.readlines() if x.strip()]
+        return raw_proxies
+
+    def get_json_cookies(self):
         files = os.listdir(os.path.join(os.getcwd(), 'cookies'))
         cookies_files = [x for x in files if x.endswith('.txt') or x.endswith('.json')]
         json_cookies = []
@@ -112,23 +116,34 @@ class ProgramManager():
                     json_cookies.append(json.loads(f.read()))
                 except Exception as e:
                     logger._error(f"[{e}] Error while parsing cookies file -> {file}")
+        return json_cookies
 
-        if len(cookies) == 0:
+    def get_cookies_count(self):
+        files = os.listdir(os.path.join(os.getcwd(), 'cookies'))
+        cookies_files = [x for x in files if x.endswith('.txt') or x.endswith('.json')]
+        return len(self.get_raw_cookies()) + len(cookies_files)
+
+    def load_accounts(self):
+        raw_cookies = self.get_raw_cookies()
+        raw_proxies = self.get_raw_proxies()
+        json_raw_cookies = self.get_json_cookies()
+
+        if len(raw_cookies) == 0 and len(json_raw_cookies) == 0:
             logger._error("Не удалось загрузить аккаунты.")
+            self.all_accounts_loaded = True
             return
         
-        json_accounts = [CookieManager.load_from_json(x) for x in json_cookies]
-        accounts = [CookieManager.load_from_str(cookie) for cookie in cookies] + json_accounts
+        json_cookies = [CookieManager.load_from_json(x) for x in json_raw_cookies]
+        cookies = [CookieManager.load_from_str(cookie) for cookie in raw_cookies] + json_cookies
         # clear errors
-        accounts = [account for account in accounts if account is not None]
+        cookies = [cookie for cookie in cookies if cookie is not None]
 
-        proxy_type = load_yaml('settings.yaml')['proxy_type']
-        #print(proxy_type)
-        proxies = [ProxyManager.load_from_str(proxy, proxy_type) for proxy in raw_proxies[:len(accounts)]]
+        proxy_type = load_yaml()['proxy_type']
+        proxies = [ProxyManager.load_from_str(proxy, proxy_type) for proxy in raw_proxies[:len(cookies)]]
 
-        if len(accounts) > len(proxies):
-            logger._error(f"Найдено куки: {len(cookies)} | Найдено прокси: {len(proxies)} | {len(cookies) - len(proxies)} аккаунтов будут работать без прокси.")
-            time.sleep(5)
+        if len(cookies) > len(proxies):
+            logger._error(f"Найдено aккаунтов: {len(cookies)} | Найдено прокси: {len(proxies)} | {len(cookies) - len(proxies)} аккаунтов будут работать без прокси.")
+            time.sleep(1)
             # add empty proxies
             proxies += [{'http': '', 'https': ''}] * (len(cookies) - len(proxies))
 
@@ -138,11 +153,19 @@ class ProgramManager():
         #    self.accounts.append(TwitterSDK(account, proxy))
         threads = [
             threading.Thread(
-            target = lambda account, proxy, accounts: accounts.append(TwitterSDK(account, proxy)), 
-            args = (account, proxy, self.accounts,)) 
-            for account, proxy in zip(accounts, proxies)]
+            target = lambda cookie, proxy, accounts: accounts.append(TwitterSDK(cookie, proxy)), 
+            args = (cookie, proxy, self.accounts,)) 
+            for cookie, proxy in zip(cookies, proxies)]
         
         for thread in threads:
+            # random wait
+            settings = load_yaml()
+            wait_time = random.randint(
+                settings['random_wait']['init_min'], 
+                settings['random_wait']['init_max'])
+            logger.debug(f"Wait init: {wait_time} sec")
+            time.sleep(wait_time)
+
             thread.start()
 
         for thread in threads:
@@ -196,6 +219,14 @@ class ProgramManager():
             for account in self.accounts]
         
         for thread in threads:
+            # random wait
+            settings = load_yaml()
+            wait_time = random.randint(
+                settings['random_wait']['between_min'], 
+                settings['random_wait']['between_max'])
+            logger.debug(f"Wait between: {wait_time} sec")
+            time.sleep(wait_time)
+            
             thread.start()
 
         for thread in threads:
@@ -458,8 +489,6 @@ class PyWebIoActions:
             "Отмечать тех на кого подписан": 3
         }[mark_type_raw]
 
-        print(tweet_id, tweet_text, mark_type, mark_count)
-
         if not tweet_id:
             put_error("Неверный URL твита", scope = 'main_action')
             return False
@@ -513,10 +542,26 @@ def main():
     if not program.all_accounts_loaded:
         put_scope('loading_accs')
         put_info(f"Идёт загрузка аккаунтов...", scope='loading_accs')
+        textarea = "Найдено куки: {len_cookies}\n"\
+                   "Найдено прокси: {len_proxies}\n"\
+                   "Загружено аккаунтов: {len_accs} / {len_cookies}"
+
+        put_textarea('loading_accs_text', value = textarea.format(
+            len_cookies=program.get_cookies_count(),
+            len_proxies=len(program.get_raw_proxies()),
+            len_accs=len(program.accounts),
+        ), rows=3, readonly=True, scope='loading_accs')
+
         put_loading(scope='loading_accs')
         while True:
             if not program.all_accounts_loaded:
-                time.sleep(1)
+                time.sleep(0.5)
+                pin_update('loading_accs_text',
+                            value = textarea.format(
+                                len_cookies=program.get_cookies_count(),
+                                len_proxies=len(program.get_raw_proxies()),
+                                len_accs=len(program.accounts),
+                           ))
             else:
                 break
         clear('loading_accs')
@@ -561,7 +606,7 @@ if __name__ == '__main__':
     logger._success("Subscribe -> https://t.me/lowbanktrade")
     program = ProgramManager()
 
-    PORT = load_yaml('settings.yaml').get('port', 8080)
+    PORT = load_yaml().get('port', 8080)
 
     if is_port_avaliable(PORT):
         threading.Thread(target = program.load_accounts).start()

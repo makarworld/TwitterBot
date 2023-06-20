@@ -81,8 +81,8 @@ def get_latest_version() -> str:
 
 def is_program_latest() -> tuple:
     latest = get_latest_version()
-    print(__version__.encode(), latest.encode())
-    if __version__ != latest and latest is not False:
+
+    if "v" + __version__ == latest:
         return True, latest
     return False, latest
 

@@ -4,8 +4,9 @@ port: 8081
 
 random_wait:
   init_min: 1
-  init_max: 20
-  between_min: 30
-  between_max: 40
+  init_max: 5
+  between_min: 5
+  between_max: 20
 
+threaded_init: false
 outdated_notification: true

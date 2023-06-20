@@ -13,6 +13,7 @@ import sys
 import ctypes
 import socket
 import requests
+import concurrent.futures
 
 from twitterSDK import TwitterSDK, CookieManager, ProxyManager
 from __init__ import __version__
@@ -33,7 +34,7 @@ logger.add("twitterbot.log",
 
 ctypes.windll.kernel32.SetConsoleTitleW('TwitterBot by @abuztrade & @wsesearch | Subscribe -> https://t.me/lowbanktrade | https://t.me/wsesearch')
 
-LOG_CONTENT = f"[{__version__}]] TwitterBot by @abuztrade & @wsesearch.\n"\
+LOG_CONTENT = f"[{__version__}] TwitterBot by @abuztrade & @wsesearch.\n"\
               "Subscribe -> https://t.me/lowbanktrade\n"\
               "Subscribe -> https://t.me/wsesearch\n"
 
@@ -96,6 +97,9 @@ def is_port_avaliable(port: int):
     sock.close()
     return result != 0
 
+def remove_dublicates(_list: List[str]) -> List[str]:
+    return list(set(_list))
+
 class ProgramManager():
     _instance = None
     def __new__(cls):
@@ -113,12 +117,12 @@ class ProgramManager():
     def get_raw_proxies(self):
         with open('proxies.txt', 'r') as f:
             raw_proxies = [x.strip() for x in f.readlines() if x.strip()]
-        return raw_proxies
+        return remove_dublicates(raw_proxies)
     
     def get_raw_cookies(self):
-        with open('proxies.txt', 'r') as f:
-            raw_proxies = [x.strip() for x in f.readlines() if x.strip()]
-        return raw_proxies
+        with open('cookies.txt', 'r') as f:
+            raw_cookies = [x.strip() for x in f.readlines() if x.strip()]
+        return remove_dublicates(raw_cookies)
 
     def get_json_cookies(self):
         files = os.listdir(os.path.join(os.getcwd(), 'cookies'))
@@ -127,7 +131,9 @@ class ProgramManager():
         for file in cookies_files:
             with open(os.path.join(os.getcwd(), 'cookies', file), 'r') as f:
                 try:
-                    json_cookies.append(json.loads(f.read()))
+                    _dict = json.loads(f.read())
+                    if _dict not in json_cookies:
+                        json_cookies.append(_dict)
                 except Exception as e:
                     logger._error(f"[{e}] Error while parsing cookies file -> {file}")
         return json_cookies
@@ -162,28 +168,33 @@ class ProgramManager():
             proxies += [{'http': '', 'https': ''}] * (len(cookies) - len(proxies))
 
         self.accounts = []
-        #print(accounts)
-        #for account, proxy in zip(accounts, proxies):
-        #    self.accounts.append(TwitterSDK(account, proxy))
-        threads = [
-            threading.Thread(
-            target = lambda cookie, proxy, accounts: accounts.append(TwitterSDK(cookie, proxy)), 
-            args = (cookie, proxy, self.accounts,)) 
-            for cookie, proxy in zip(cookies, proxies)]
-        
-        for thread in threads:
-            # random wait
-            settings = load_yaml()
-            wait_time = random.randint(
-                settings['random_wait']['init_min'], 
-                settings['random_wait']['init_max'])
-            logger.debug(f"Wait init: {wait_time} sec")
-            time.sleep(wait_time)
 
-            thread.start()
+        settings = load_yaml()
 
-        for thread in threads:
-            thread.join()
+        if not settings['threaded_init']:
+            accuracy = 0
+            for i, cookie in enumerate(cookies):
+                # random wait
+                wait_time = random.randint(
+                    settings['random_wait']['init_min'], 
+                    settings['random_wait']['init_max'])
+                logger.debug(f"Wait init: {wait_time} sec")
+                # if user exists -> add to accounts
+                # if some errors with user -> add accuracy for use unused proxy
+                user = TwitterSDK(cookie, proxies[i - accuracy])
+                if user.username:
+                    self.accounts.append(user)
+                else:
+                    accuracy += 1
+        else:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = [
+                    executor.submit(
+                        lambda cookie, proxy, accounts: accounts.append(TwitterSDK(cookie, proxy)), 
+                        cookie, proxy, self.accounts
+                ) for cookie, proxy in zip(cookies, proxies)]
+
+                concurrent.futures.wait(futures)
 
         # clear invalid accounts
         self.accounts = [account for account in self.accounts if account.username is not None]
@@ -223,8 +234,6 @@ class ProgramManager():
 
         if not validate:
             validate = lambda res: res.get("errors") is None
-        #print(*args, **kwargs)
-        #func = getattr(self.accounts[0], action)
 
         threads = [
             threading.Thread(target = self.get_result, 

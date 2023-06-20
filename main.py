@@ -519,5 +519,5 @@ if __name__ == '__main__':
     start_server(
         main, 
         port = 8080, 
-        auto_open_webbrowser = False
+        auto_open_webbrowser = True
     )

@@ -7,9 +7,30 @@ from pywebio.output import *
 from typing import *
 import threading
 import yaml
+from loguru import logger
+import sys
+import ctypes
 
-from twitterSDK import TwitterSDK, CookieManager, ProxyManager, logger
+from twitterSDK import TwitterSDK, CookieManager, ProxyManager
 from __init__ import __version__
+
+logger.remove()
+logger.add(sys.stderr,
+    level = "DEBUG",
+    format = "<white>{time:HH:mm:ss}</white> | "
+    "<level>{level}</level> | "
+    "<cyan>{function}</cyan> - <white>{message}</white>", backtrace=True, diagnose=True)
+
+logger.add("twitterbot.log",
+    level = "DEBUG",
+    format = "<white>{time:HH:mm:ss}</white> | "
+    "<level>{level}</level> | "
+    "<cyan>{function}</cyan> - <white>{message}</white>", backtrace=True, diagnose=True)
+
+
+ctypes.windll.kernel32.SetConsoleTitleW('TwitterBot by @abuztrade & @wsesearch | Subscribe -> https://t.me/lowbanktrade | https://t.me/wsesearch')
+
+
 
 LOG_CONTENT = f"[{__version__}]] TwitterBot by @abuztrade.\n"\
               "Subscribe -> https://t.me/lowbanktrade\n"
@@ -107,15 +128,15 @@ class ProgramManager(Singleton):
         # clear errors
         accounts = [account for account in accounts if account is not None]
 
-        if len(accounts) > len(raw_proxies):
-            logger._error(f"Найдено куки: {len(cookies)} | Найдено прокси: {len(raw_proxies)} | {len(cookies) - len(raw_proxies)} аккаунтов будут работать без прокси.")
-            time.sleep(5)
-            # add empty proxies
-            raw_proxies += [{'http': '', 'https': ''}] * (len(cookies) - len(raw_proxies))
-
         proxy_type = load_yaml('settings.yaml')['proxy_type']
         #print(proxy_type)
         proxies = [ProxyManager.load_from_str(proxy, proxy_type) for proxy in raw_proxies[:len(accounts)]]
+
+        if len(accounts) > len(proxies):
+            logger._error(f"Найдено куки: {len(cookies)} | Найдено прокси: {len(proxies)} | {len(cookies) - len(proxies)} аккаунтов будут работать без прокси.")
+            time.sleep(5)
+            # add empty proxies
+            proxies += [{'http': '', 'https': ''}] * (len(cookies) - len(proxies))
 
         self.accounts = []
         #print(accounts)

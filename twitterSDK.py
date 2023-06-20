@@ -5,26 +5,7 @@ import urllib3
 from loguru import logger
 import pyuseragents 
 import random
-import sys
-import ctypes
 import json  
-
-# TODO: replace to main.py
-logger.remove()
-logger.add(sys.stderr,
-    level = "DEBUG",
-    format = "<white>{time:HH:mm:ss}</white> | "
-    "<level>{level}</level> | "
-    "<cyan>{function}</cyan> - <white>{message}</white>", backtrace=True, diagnose=True)
-
-logger.add("twitterbot.log",
-    level = "DEBUG",
-    format = "<white>{time:HH:mm:ss}</white> | "
-    "<level>{level}</level> | "
-    "<cyan>{function}</cyan> - <white>{message}</white>", backtrace=True, diagnose=True)
-
-
-ctypes.windll.kernel32.SetConsoleTitleW('TwitterBot by @abuztrade | Subscribe -> https://t.me/lowbanktrade')
 
 urllib3.disable_warnings()
 
@@ -81,19 +62,7 @@ class DataManager:
 
     @staticmethod
     def get_query_id(key: str) -> str:
-        return DataManager.__dict__[key]
-
-def dict_to_string(d: dict):
-    return str(d).replace("[", "%5B")\
-                 .replace("]", "%5D")\
-                 .replace("{", "%7B")\
-                 .replace("}", "%7D")\
-                 .replace("'", "%22")\
-                 .replace(": ", "%3A")\
-                 .replace(", ", "%2C")\
-                 .replace(" ", "%20")\
-                 .replace("True", "true")\
-                 .replace("False", "false")
+        return DataManager.__dict__.get(key)
 
 def to_query_params(params: dict):
     return '?' + '&'.join([f"{k}={v}" for k, v in params.items()])

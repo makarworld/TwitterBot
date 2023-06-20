@@ -12,6 +12,7 @@ from loguru import logger
 import sys
 import ctypes
 import socket
+import requests
 
 from twitterSDK import TwitterSDK, CookieManager, ProxyManager
 from __init__ import __version__
@@ -70,6 +71,21 @@ logger.success = success
 logger.error = error
 logger.warning = warning
 
+def get_latest_version():
+    try:
+        resp = requests.get('https://api.github.com/repos/makarworld/TwitterBot/releases/latest')
+        return resp.json()['tag_name']
+    except Exception as e:
+        logger._error(f"[{e}] Error while getting latest version from github.")
+        return False
+
+def is_program_latest():
+    latest = get_latest_version()
+
+    if __version__ != latest and latest is not False:
+        return True, latest
+    return False, latest
+
 def load_yaml():
     with open('settings.yaml', 'r') as f:
         return yaml.safe_load(f)
@@ -85,7 +101,6 @@ class ProgramManager():
     _instance = None
     def __new__(cls):
         if cls._instance is None:
-            print('Creating the object')
             cls._instance = super(ProgramManager, cls).__new__(cls)
             # Put any initialization here.
             cls.init(cls._instance)
@@ -538,6 +553,13 @@ class PyWebIoActions:
 def main():
     program = ProgramManager()
     put_markdown("## TwitterBot by @abuztrade")
+    if outdated_notification:
+        if is_program_outdated:
+            put_error(
+                f"Вы используете устаревшую версию программы: {__version__}.\n"\
+                f"Версия {new_version} уже доступна.\n"\
+                f"Ссылка на github: https://github.com/makarworld/TwitterBot\n"\
+                f"*Это уведомление можно отключить (settings.yaml -> outdated_notification: false)\n")
 
     if not program.all_accounts_loaded:
         put_scope('loading_accs')
@@ -605,6 +627,11 @@ if __name__ == '__main__':
     logger._info(f"[{__version__}] TwitterBot by @abuztrade.")
     logger._success("Subscribe -> https://t.me/lowbanktrade")
     program = ProgramManager()
+
+    outdated_notification = load_yaml().get('outdated_notification', False)
+    if outdated_notification:
+        is_program_outdated, new_version = is_program_latest()
+
 
     PORT = load_yaml().get('port', 8080)
 

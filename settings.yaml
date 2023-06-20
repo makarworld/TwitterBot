@@ -7,3 +7,5 @@ random_wait:
   init_max: 20
   between_min: 30
   between_max: 40
+
+outdated_notification: true

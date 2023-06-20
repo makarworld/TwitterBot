@@ -71,7 +71,7 @@ logger.success = success
 logger.error = error
 logger.warning = warning
 
-def get_latest_version():
+def get_latest_version() -> str:
     try:
         resp = requests.get('https://api.github.com/repos/makarworld/TwitterBot/releases/latest')
         return resp.json()['tag_name']
@@ -79,9 +79,9 @@ def get_latest_version():
         logger._error(f"[{e}] Error while getting latest version from github.")
         return False
 
-def is_program_latest():
+def is_program_latest() -> tuple:
     latest = get_latest_version()
-
+    print(__version__.encode(), latest.encode())
     if __version__ != latest and latest is not False:
         return True, latest
     return False, latest
@@ -93,7 +93,6 @@ def load_yaml():
 def is_port_avaliable(port: int):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     result = sock.connect_ex(('127.0.0.1', port))
-    print(result)
     sock.close()
     return result != 0
 
@@ -554,7 +553,7 @@ def main():
     program = ProgramManager()
     put_markdown("## TwitterBot by @abuztrade")
     if outdated_notification:
-        if is_program_outdated:
+        if not is_program_last_version:
             put_error(
                 f"Вы используете устаревшую версию программы: {__version__}.\n"\
                 f"Версия {new_version} уже доступна.\n"\
@@ -630,7 +629,7 @@ if __name__ == '__main__':
 
     outdated_notification = load_yaml().get('outdated_notification', False)
     if outdated_notification:
-        is_program_outdated, new_version = is_program_latest()
+        is_program_last_version, new_version = is_program_latest()
 
 
     PORT = load_yaml().get('port', 8080)

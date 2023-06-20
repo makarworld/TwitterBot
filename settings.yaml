@@ -1,0 +1,2 @@
+# http / https / socks4 / socks5
+proxy_type: http

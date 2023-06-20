@@ -1,5 +1,7 @@
 # TwitterBot by @abuztrade
 
+![GUI](https://i.imgur.com/hazjGE2.png)
+
 ### Installation
 
 1. Открываем в папке проекта консоль

@@ -3,8 +3,11 @@ import os
 import random
 import time
 from pywebio import start_server
-from pywebio.pin import put_input, put_textarea, pin_on_change, put_select, pin_update, pin
+from pywebio.pin import put_input, put_textarea, pin_on_change, put_select, pin_update, put_slider, pin
 from pywebio.output import *
+from pywebio import config
+from pywebio.session import register_thread
+from pywebio.session import set_env
 from typing import *
 import threading
 import yaml
@@ -113,6 +116,8 @@ class ProgramManager():
     def init(self):
         self.accounts: List[TwitterSDK] = []
         self.all_accounts_loaded = False
+        self.results = Results()
+        self.ready = True
     
     def get_raw_proxies(self):
         with open('proxies.txt', 'r') as f:
@@ -220,6 +225,7 @@ class ProgramManager():
         return int(r)
 
     def do_mass_action(self, action: str, validate = None, *args, **kwargs):
+        self.ready = False
         access_methods = (
             "follow", "unfollow", 
             "retweet", "like", 
@@ -228,34 +234,41 @@ class ProgramManager():
         if action not in access_methods:
             raise ValueError(f"Unknown action: {action}")
         
-        # start threads
-
-        results = Results()
+        self.results = Results()
 
         if not validate:
             validate = lambda res: res.get("errors") is None
 
-        threads = [
-            threading.Thread(target = self.get_result, 
-                             args = [results, validate, getattr(account, action), account.username] + list(args), 
-                             kwargs = kwargs) 
-            for account in self.accounts]
-        
-        for thread in threads:
-            # random wait
-            settings = load_yaml()
-            wait_time = random.randint(
-                settings['random_wait']['between_min'], 
-                settings['random_wait']['between_max'])
-            logger.debug(f"Wait between: {wait_time} sec")
-            time.sleep(wait_time)
-            
-            thread.start()
+        # get web settings
+        threaded_start = Options.thread_option[pin['thread']]
 
-        for thread in threads:
-            thread.join()
+        if threaded_start == 1: # Запускать в один поток с задержками
+            between_min = pin['between_min']
+            between_max = pin['between_max']
+            logger.debug(f"waits | min: {between_min} max: {between_max}")
 
-        return results
+            for account in self.accounts:
+                time_wait = random.randint(between_min, between_max)
+                logger.info(f"[{account.username}] Wait {time_wait} sec")
+                time.sleep(time_wait)
+                self.get_result(self.results, validate, getattr(account, action), account.username, *args, **kwargs)
+
+        else:
+            # start threads
+            threads = [
+                threading.Thread(target = self.get_result, 
+                                args = [self.results, validate, getattr(account, action), account.username] + list(args), 
+                                kwargs = kwargs) 
+                for account in self.accounts]
+
+            for thread in threads:
+                thread.start()
+
+            for thread in threads:
+                thread.join()
+
+        self.ready = True
+        return self.results
 
     
     def get_result(self, results, validate, func, result_extra, *args, **kwargs):
@@ -300,15 +313,35 @@ class Results:
         return self._fail
 
 class PyWebIoActions:
-    
     @staticmethod
     def return_mass_results(start_text: str, action_name: str, additional_info: str, func, *args, **kwargs):
         logger.info(start_text)
 
         put_info("Аккаунты запущены", scope = 'main_action')
-        put_loading(scope = 'main_action')
+        textarea = f"Действие: {action_name}\n"\
+                   "Всего аккаунтов: {len_accs}\n"\
+                   "Получено результатов: {len_results} / {len_accs}"\
+
+        put_textarea('loading_results_text', value = textarea.format(
+            len_accs=len(program.accounts),
+            len_results=0
+        ), rows=3, readonly=True, scope = 'main_action')
+        put_loading(color='primary', scope = 'main_action')
         
-        results = func(*args, **kwargs)
+        thread = threading.Thread(target=func, args=args, kwargs=kwargs)
+        register_thread(thread=thread)
+        thread.start()
+        program.ready = False
+        
+        while program.ready == False:
+            time.sleep(0.5)
+            pin_update('loading_results_text', value = textarea.format(
+                len_accs=len(program.accounts),
+                len_results=len(program.results._results)
+            ))
+        
+        results = program.results
+
         clear('main_action')
 
         put_markdown("### Результаты:", scope = 'main_action')
@@ -354,10 +387,11 @@ class PyWebIoActions:
 
     @staticmethod
     def follow():
+        if not program.ready: return
         clear('main_action')
 
         put_markdown("### Массовые подписки", scope = 'main_action')
-        put_input("link", label="Введите ссылку на аккаунт:", value="https://twitter.com/", scope = 'main_action')
+        put_input("link", label="Введите ссылку на аккаунт:", placeholder="https://twitter.com/username", scope = 'main_action')
         put_row([
             put_button("Подписаться со всех аккаунтов", onclick = PyWebIoActions.mass_follow),
             put_button("Отмена", onclick=lambda: clear('main_action'))
@@ -391,10 +425,11 @@ class PyWebIoActions:
 
     @staticmethod
     def unfollow():
+        if not program.ready: return
         clear('main_action')
 
         put_markdown("### Массовые отписки", scope = 'main_action')
-        put_input("link", label="Введите ссылку на аккаунт:", value="https://twitter.com/", scope = 'main_action')
+        put_input("link", label="Введите ссылку на аккаунт:", placeholder="https://twitter.com/username", scope = 'main_action')
         put_row([
             put_button("Отписаться со всех аккаунтов", onclick = PyWebIoActions.mass_unfollow),
             put_button("Отмена", onclick=lambda: clear('main_action'))
@@ -426,10 +461,11 @@ class PyWebIoActions:
 
     @staticmethod
     def like():
+        if not program.ready: return
         clear('main_action')
 
         put_markdown("### Массовые лайки", scope = 'main_action')
-        put_input("link", label="Введите ссылку на твит:", value="https://twitter.com/", scope = 'main_action')
+        put_input("link", label="Введите ссылку на твит:", placeholder="https://twitter.com/username/status/1656991423101644801", scope = 'main_action')
         put_row([
             put_button("Поставить лайк со всех аккаунтов", onclick = PyWebIoActions.mass_like),
             put_button("Отмена", onclick=lambda: clear('main_action'))
@@ -454,6 +490,7 @@ class PyWebIoActions:
         
     @staticmethod
     def tweet():
+        if not program.ready: return
         clear('main_action')
 
         put_markdown("### Массовые твиты", scope = 'main_action'),
@@ -488,10 +525,11 @@ class PyWebIoActions:
         
     @staticmethod
     def retweet():
+        if not program.ready: return
         clear('main_action')
 
         put_markdown("### Массовый ретвит", scope = 'main_action')
-        put_input("link", label="Введите ссылку на твит:", value="https://twitter.com/", scope = 'main_action')
+        put_input("link", label="Введите ссылку на твит:", placeholder="https://twitter.com/username/status/1656991423101644801", scope = 'main_action')
         put_row([
             put_button("Отправить ретвит со всех аккаунтов", onclick = PyWebIoActions.mass_retweet),
             put_button("Отмена", onclick=lambda: clear('main_action'))
@@ -542,14 +580,14 @@ class PyWebIoActions:
         
     @staticmethod
     def comment():
+        if not program.ready: return
         clear('main_action')
 
-
         put_markdown("### Массовые комментарии", scope = 'main_action')
-        put_input("link1", label="Введите ссылку на твит:", value="https://twitter.com/", scope = 'main_action')
+        put_input("link1", label="Введите ссылку на твит:", placeholder="https://twitter.com/username/status/1656991423101644801", scope = 'main_action')
         put_textarea("link2", label="Введите текст комментария:", value="", rows = 2, scope = 'main_action')
         put_collapse("Отмечать пользователей", [
-            put_select("link3", label="Каких пользователей отмечать:", options = ["Отмечать случайных пользователей", "Отмечать фоловеров", "Отмечать тех на кого подписан"], value = 0),
+            put_select("link3", label="Каких пользователей отмечать:", options = list(Options.mark_options.keys()), value = 0),
             put_select("link4", label="Кол-во пользователей для упоминания:", options = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
         ], open = False, scope = 'main_action')
         put_row([
@@ -557,10 +595,38 @@ class PyWebIoActions:
             put_button("Отмена", onclick=lambda: clear('main_action'))
         ], size = '360px', scope = 'main_action')
 
+class Options:
+    thread_option = {
+        "Запускать в один поток с задержками": 1,
+        "Запустить в многопотоке без задержек (риск бана)": 2
+    }
 
+    mass_options = {
+        "Массовые подписки": PyWebIoActions.follow,
+        "Массовые отписки": PyWebIoActions.unfollow,
+        "Массовые лайки": PyWebIoActions.like,
+        "Массовые твиты": PyWebIoActions.tweet,
+        "Массовые ретвиты": PyWebIoActions.retweet,
+        "Массовые комментарии": PyWebIoActions.comment
+    }
+
+    mark_options = {
+        "Отмечать случайных пользователей": 1,
+        "Отмечать фоловеров": 2,
+        "Отмечать тех на кого подписан": 3
+    }
+
+@config(theme = [
+                theme := load_yaml().get("pywebio_theme"), 
+                theme if theme in ("default", "dark", "sketchy", "minty", "yeti") else "default"][-1])
 def main():
+    set_env(
+        title = "TwitterBot by @abuztrade",
+        output_animation = False
+    )
+
     program = ProgramManager()
-    put_markdown("## TwitterBot by @abuztrade")
+    put_markdown("# TwitterBot by @abuztrade")
     if outdated_notification:
         if not is_program_last_version:
             put_error(
@@ -582,7 +648,7 @@ def main():
             len_accs=len(program.accounts),
         ), rows=3, readonly=True, scope='loading_accs')
 
-        put_loading(scope='loading_accs')
+        put_loading(color='primary', scope='loading_accs')
         while True:
             if not program.all_accounts_loaded:
                 time.sleep(0.5)
@@ -605,20 +671,20 @@ def main():
             tdata = [[f"@{account.username}", account.user_id, account.proxies["http"].split('@')[-1] if "@" in account.proxies["http"] else "direct"] for account in program.accounts])
     ], open = False)
 
-    put_markdown("### Действия:")
+    settings = load_yaml()
 
-    actions = {
-        "Массовые подписки": PyWebIoActions.follow,
-        "Массовые отписки": PyWebIoActions.unfollow,
-        "Массовые лайки": PyWebIoActions.like,
-        "Массовые твиты": PyWebIoActions.tweet,
-        "Массовые ретвиты": PyWebIoActions.retweet,
-        "Массовые комментарии": PyWebIoActions.comment
-    }
+    #put_collapse("Настройки", [
+    put_markdown("### Настройки:")
+    put_select("thread", label="Настройка запуска:", options=list(Options.thread_option.keys()), value=0),
+    put_slider("between_min", label="Минимальная задержка между аккаунтами", value=settings["random_wait"]["default_between_min"], min_value=0, max_value=settings["slider_max_value"], step=1),
+    put_slider("between_max", label="Максимальная задержка между аккаунтами", value=settings["random_wait"]["default_between_max"], min_value=0, max_value=settings["slider_max_value"], step=1)
+    #], open = False)
+        
+    put_markdown("## Действия:")
 
-    put_select("action", label="Действие", options = list(actions.keys()), value = 0)
+    put_select("action", label="Выберите действие:", options = list(Options.mass_options.keys()), value = 0)
     
-    pin_on_change("action", onchange = lambda value: actions[value]())
+    pin_on_change("action", onchange = lambda value: Options.mass_options[value]())
 
     put_markdown("---")
 
@@ -626,7 +692,7 @@ def main():
     PyWebIoActions.follow()
 
     put_markdown("---")
-    put_markdown("### Log:")
+    put_markdown("## Log:")
     put_scope('log')
     put_code(LOG_CONTENT, scope='log')
 

@@ -5,8 +5,14 @@ port: 8081
 random_wait:
   init_min: 1
   init_max: 5
-  between_min: 5
-  between_max: 20
+  default_between_min: 5
+  default_between_max: 20
+
+slider_max_value: 120
 
 threaded_init: false
 outdated_notification: true
+
+# themes - default / dark / scetchy / minty / yeti
+# use can see all themes here -> https://pywebio-demos.pywebio.online/theme?app=dark
+pywebio_theme: default

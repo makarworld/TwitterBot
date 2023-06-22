@@ -1,77 +1,10 @@
-import base64
 from typing import *
 import requests
-import urllib3
 from urllib3.exceptions import ProtocolError
-from loguru import logger
 import pyuseragents 
 import random
 import json  
-
-urllib3.disable_warnings()
-
-class CookieManager:
-    @staticmethod
-    def load_from_str(cookies_str: str) -> dict:
-        try:
-            if cookies_str.endswith('=='):
-                # only if cookies_str is base64 decoded string with list of cookies
-                cookies_str = base64.b64decode(cookies_str).decode()
-                cookies = json.loads(cookies_str)
-                cookies_dict = {x["name"]: x["value"] for x in cookies}
-            else:
-                # only if cookies_str is string from browser (F12)
-                cocs = [x.strip() for x in cookies_str.split(';')]
-                cookies_dict = {}
-                for c in cocs:
-                    k, v = c.split('=', 1)
-                    cookies_dict[k] = v
-            
-            return cookies_dict
-        except Exception as e:
-            logger._error("[{}] CookieManager.load_from_str -> Error while parsing cookies -> {}".format(e, cookies_str.replace('\n', '').replace('\r', '').replace('\t', '').replace(' ', '')))
-    
-    @staticmethod
-    def load_from_json(cookies_json: List[dict]) -> dict:
-        if isinstance(cookies_json, list):
-            if cookies_json[0].get("name"):
-                return {x["name"]: x["value"] for x in cookies_json}
-            return {k: v for x in cookies_json for k, v in x.items()}
-        return cookies_json
-
-class ProxyManager:
-    @staticmethod
-    def load_from_str(proxies_str: str, proxy_type: str = 'http') -> dict:
-        return {
-            'http': f'{proxy_type}://{proxies_str}',
-            'https': f'{proxy_type}://{proxies_str}'
-        }
-
-class URLManager:
-    home = 'https://twitter.com/home'
-    query_ids = 'https://abs.twimg.com/responsive-web/client-web-legacy/main.2f948aea.js'
-
-class DataManager:
-    bearer = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
-    TweetResultByRestId = "V3vfsYzNEyD9tsf4xoFRgw"
-    CreateRetweet       = "ojPdsZsimiJrUGLR1sjUtA"
-    FavoriteTweet       = "lI07N6Otwv1PhnEgXILM7A"
-    CreateTweet         = "GUFG748vuvmewdXbB5uPKg"
-    ModerateTweet       = "pjFnHGVqCjTcZol0xcBJjw"
-    DeleteTweet         = "VaenaVgh5q5ih7kvyVjgtg"
-    UserTweets          = "Uuw5X2n3tuGE_SatnXUqLA"
-
-    @staticmethod
-    def get_query_id(key: str) -> str:
-        return DataManager.__dict__.get(key)
-
-def to_query_params(params: dict):
-    return '?' + '&'.join([f"{k}={v}" for k, v in params.items()])
-
-def create_random(k: int = 3):
-    return "".join(list(
-                   random.choices("abcdefghijklmnopqrstuvwxyz013456789", k = k)))
-
+from utils import *
 
 class TwitterSDK:
 
@@ -126,6 +59,8 @@ class TwitterSDK:
             if req.json().get("errors"):
                 if req.json()["errors"][0].get("message") == "Could not authenticate you":
                     logger._error(f"Invalid cookies (ERROR:Could not authenticate you) -> {self.cookies}")
+                if req.json()["errors"][0].get("message") == "To protect our users from spam and other malicious activity, this account is temporarily locked. Please log in to https://twitter.com to unlock your account.":
+                    logger._error(f"Invalid cookies | Account got ban (ERROR:{req.json()['errors'][0].get('message')}) -> {self.cookies}")
         except:
             pass
 
@@ -133,7 +68,11 @@ class TwitterSDK:
             return req
         
         if return_value == 'json':
-            return req.json()
+            try:
+                return req.json()
+            except:
+                return {"errors": [{"message": f"Cannot parse response: {req.text}"}]}
+
         
         if return_value == 'text':
             return req.text
@@ -170,7 +109,7 @@ class TwitterSDK:
                                 src = 'compose',
                                 result_type = 'users',
                                 context_text = first3
-                            )).json()
+                            ), return_value = 'json')
     
     def get_followers(self, count: int = 20) -> dict:
         return self.call(
@@ -202,8 +141,7 @@ class TwitterSDK:
                         longform_notetweets_inline_media_enabled = True,
                         responsive_web_enhance_cards_enabled = False
                     ), separators=(',', ':'))
-                  ))
-        ).json()
+                  )), return_value = 'json')
 
     def get_following(self, count: int = 20) -> dict:
         return self.call(
@@ -235,8 +173,7 @@ class TwitterSDK:
                         longform_notetweets_inline_media_enabled = True,
                         responsive_web_enhance_cards_enabled = False
                     ), separators=(',', ':'))
-                  ))
-        ).json()
+                  )), return_value = 'json')
 
     def get_random_usernames(self, length: int) -> List[str]:
         users_list = []
@@ -296,7 +233,7 @@ class TwitterSDK:
                   )),
             headers = {
                 'content-type': 'application/x-www-form-urlencoded'
-            }).json()
+            }, return_value = 'json')
 
     def __follow_action(self, user_id: str, action: Literal['create', 'destroy']) -> requests.Response:
         return self.call(
@@ -320,8 +257,7 @@ class TwitterSDK:
                 ),
                 headers = {
                     'content-type': 'application/x-www-form-urlencoded' 
-                }
-            )
+                }, return_value = 'json')
 
     def follow(self, author: str = None, user_id: int = None) -> dict:
         if not author and not user_id:
@@ -334,7 +270,7 @@ class TwitterSDK:
             else:
                 raise ValueError("User not found.")
 
-        return self.__follow_action(user_id, 'create').json()
+        return self.__follow_action(user_id, 'create')
     
     def unfollow(self, author: str = None, user_id: int = None) -> dict:
         if not author and not user_id:
@@ -347,7 +283,7 @@ class TwitterSDK:
             else:
                 raise ValueError("User not found.")
             
-        return self.__follow_action(user_id, 'destroy').json()
+        return self.__follow_action(user_id, 'destroy')
     
     def __tweet_action(self, tweet_id: int, action: Literal["CreateRetweet", "FavoriteTweet"]) -> requests.Response:
         query_id = DataManager.get_query_id(action)
@@ -361,14 +297,13 @@ class TwitterSDK:
                 ),
                 queryId = query_id
             ),
-            headers = {'content-type': 'application/json'}
-        )
+            headers = {'content-type': 'application/json'}, return_value = 'json')
 
     def retweet(self, tweet_id: int) -> dict:
-        return self.__tweet_action(tweet_id, 'CreateRetweet').json()
+        return self.__tweet_action(tweet_id, 'CreateRetweet')
 
     def like(self, tweet_id: int) -> dict:
-        return self.__tweet_action(tweet_id, 'FavoriteTweet').json()
+        return self.__tweet_action(tweet_id, 'FavoriteTweet')
     
     def __tweet_actionv2(self, text: int, tweet_id: int = None) -> requests.Response:
         action = "CreateTweet"
@@ -415,14 +350,14 @@ class TwitterSDK:
             json = _json,
             headers = {
                 'content-type': 'application/json'
-            })
+            }, return_value = 'json')
     
 
     def tweet(self, text: str) -> dict:
-        return self.__tweet_actionv2(text).json()
+        return self.__tweet_actionv2(text)
 
     def comment(self, tweet_id: int, text: str) -> dict:
-        return self.__tweet_actionv2(text, tweet_id).json()
+        return self.__tweet_actionv2(text, tweet_id)
 
     def advanced_comment(self, tweet_id: int, text: str, mark_count: int, mark_type: int) -> dict:
         if mark_count > 0:
@@ -433,7 +368,7 @@ class TwitterSDK:
             elif mark_type == 3: # followings
                 text += " " + " ".join(self.get_random_followings(mark_count))
 
-        return self.__tweet_actionv2(text, tweet_id).json()
+        return self.__tweet_actionv2(text, tweet_id)
 
     def delete_tweet(self, tweet_id: int) -> dict:
         return self.call(
@@ -445,8 +380,7 @@ class TwitterSDK:
                     dark_request = False
                 ),
                 queryId = "VaenaVgh5q5ih7kvyVjgtg"
-            )
-        ).json()
+            ), return_value = 'json')
     
     def get_tweet(self, tweet_id: int) -> dict:
         return self.call(
@@ -483,8 +417,7 @@ class TwitterSDK:
                     longform_notetweets_inline_media_enabled = True,
                     responsive_web_enhance_cards_enabled = False
                 ), separators=(',', ':'))
-            }),
-        ).json()
+            }), return_value = 'json')
 
     def change_username(self, new_username: str) -> dict:
         return self.call(
@@ -500,8 +433,7 @@ class TwitterSDK:
             ),
             headers = {
                 'content-type': 'application/x-www-form-urlencoded'
-            }
-        ).json()
+            }, return_value = 'json')
 
     def change_avatar(self, avatar_data: str) -> dict:
         return self.call(
@@ -509,7 +441,7 @@ class TwitterSDK:
             url = "https://twitter.com/i/api/1.1/account/update_profile_image.json",
             data = {"image": avatar_data},
             headers = {'content-type': 'application/x-www-form-urlencoded'},
-        ).json()
+        return_value = 'json')
 
     def change_banner(self, banner_data: str) -> dict:
         return self.call(
@@ -517,7 +449,7 @@ class TwitterSDK:
             url = "https://twitter.com/i/api/1.1/account/update_profile_banner.json",
             data = {"banner": banner_data},
             headers = {'content-type': 'application/x-www-form-urlencoded'},
-        ).json()
+        return_value = 'json')
     
 if __name__ == "__main__":
     with open('accounts.txt', 'r') as f:

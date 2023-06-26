@@ -11,7 +11,8 @@ import requests
 import yaml
 from __init__ import __version__
 from loguru import logger
-from pywebio.output import clear, put_code
+from pywebio.output import clear
+from pywebio.pin import pin_update
 
 import urllib3
 urllib3.disable_warnings()
@@ -43,9 +44,7 @@ def logger_wrapper(func):
         with open('twitterbot.log', 'r', encoding="utf-8") as f:
             LOG_CONTENT += f.readlines()[-1]
 
-        clear('log')
-
-        put_code(LOG_CONTENT, scope='log')
+        pin_update('log', value=LOG_CONTENT)
 
         return response
     
@@ -105,7 +104,13 @@ def is_port_avaliable(port: int):
     return result != 0
 
 def remove_dublicates(_list: List[str]) -> List[str]:
-    return list(set(_list))
+    new_list = []
+    
+    for item in _list:
+        if item not in new_list:
+            new_list.append(item)
+
+    return new_list
 
 class CookieManager:
     @staticmethod

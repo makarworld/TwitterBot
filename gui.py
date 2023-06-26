@@ -45,6 +45,7 @@ class ProgramManager():
         self.all_accounts_loaded = False
         self.results = Results()
         self.ready = True
+        self.fail_accounts = []
     
     def get_raw_proxies(self):
         with open('proxies.txt', 'r') as f:
@@ -86,26 +87,35 @@ class ProgramManager():
             return
         
         json_cookies = [CookieManager.load_from_json(x) for x in json_raw_cookies]
-        cookies = [CookieManager.load_from_str(cookie) for cookie in raw_cookies] + json_cookies
+        #cookies = [CookieManager.load_from_str(cookie) for cookie in raw_cookies] + json_cookies
         # clear errors
-        cookies = [cookie for cookie in cookies if cookie is not None]
+        #cookies = [cookie for cookie in cookies if cookie is not None]
+        cookies_count = len(raw_cookies) + len(json_cookies)
 
         proxy_type = load_yaml()['proxy_type']
-        proxies = [ProxyManager.load_from_str(proxy, proxy_type) for proxy in raw_proxies[:len(cookies)]]
+        proxies = [ProxyManager.load_from_str(proxy, proxy_type) for proxy in raw_proxies[:cookies_count]]
 
-        if len(cookies) > len(proxies):
-            logger._error(f"Найдено aккаунтов: {len(cookies)} | Найдено прокси: {len(proxies)} | {len(cookies) - len(proxies)} аккаунтов будут работать без прокси.")
+        if cookies_count > len(proxies):
+            logger._error(f"Найдено aккаунтов: {cookies_count} | Найдено прокси: {len(proxies)} | {cookies_count - len(proxies)} аккаунтов будут работать без прокси.")
             time.sleep(1)
             # add empty proxies
-            proxies += [{'http': '', 'https': ''}] * (len(cookies) - len(proxies))
+            proxies += [{'http': '', 'https': ''}] * (cookies_count - len(proxies))
 
-        self.accounts = []
+        self.accounts: List[Dict[str, Union[TwitterSDK, str]]] = []
 
         settings = load_yaml()
 
         if not settings['threaded_init']:
             accuracy = 0
-            for i, cookie in enumerate(cookies):
+            print(raw_cookies + json_cookies)
+            for i, raw_cookie in enumerate(raw_cookies + json_cookies):
+                print(raw_cookie)
+                if isinstance(raw_cookie, str):
+                    cookie = CookieManager.load_from_str(raw_cookie)
+                else:
+                    cookie = raw_cookie
+                print(cookie)
+
                 # random wait
                 wait_time = random.randint(
                     settings['random_wait']['init_min'], 
@@ -114,22 +124,26 @@ class ProgramManager():
                 # if user exists -> add to accounts
                 # if some errors with user -> add accuracy for use unused proxy
                 user = TwitterSDK(cookie, proxies[i - accuracy])
-                if user.username:
-                    self.accounts.append(user)
-                else:
-                    accuracy += 1
+                self.accounts.append({"user": user, "raw_cookie": raw_cookie})
+
         else:
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 futures = [
                     executor.submit(
-                        lambda cookie, proxy, accounts: accounts.append(TwitterSDK(cookie, proxy)), 
+                        lambda raw_cookie, proxy, accounts: [
+                            cookie := CookieManager.load_from_str(raw_cookie) if isinstance(raw_cookie, str) else raw_cookie,
+                            user := TwitterSDK(cookie, proxy), 
+                            accounts.append({"user": user, "raw_cookie": raw_cookie})], 
                         cookie, proxy, self.accounts
-                ) for cookie, proxy in zip(cookies, proxies)]
+                ) for cookie, proxy in zip(raw_cookies + json_cookies, proxies)]
 
                 concurrent.futures.wait(futures)
 
+        # save invalid accounts
+        self.fail_accounts = [account for account in self.accounts if account["user"].username is None]
+
         # clear invalid accounts
-        self.accounts = [account for account in self.accounts if account.username is not None]
+        self.accounts = [account["user"] for account in self.accounts if account["user"].username is not None]
 
         self.all_accounts_loaded = True
 
@@ -344,8 +358,7 @@ class PyWebIoActions:
         put_markdown("### Массовые отписки", scope = 'main_action')
         put_input("link", label="Введите ссылку на аккаунт:", placeholder="https://twitter.com/username", scope = 'main_action')
         put_row([
-            put_button("Отписаться со всех аккаунтов", onclick = PyWebIoActions.mass_unfollow),
-            put_button("Отмена", onclick=lambda: clear('main_action'))
+            put_button("Запустить действие со всех аккаунтов", onclick = PyWebIoActions.mass_unfollow)
         ], size = '258px', scope = 'main_action')
 
         
@@ -611,5 +624,5 @@ def main():
 
     put_markdown("---")
     put_markdown("## Log:")
-    put_scope('log')
-    put_code(LOG_CONTENT, scope='log')
+    #put_scope('log')
+    put_textarea('log', value=LOG_CONTENT, readonly=True, code='true')

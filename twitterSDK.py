@@ -11,13 +11,16 @@ class TwitterSDK:
     def __init__(self, cookies: dict, proxies: dict):
         self.cookies = cookies
         self.proxies = proxies
+        self.username = None
+
+        if not cookies: return
 
         self.session = requests.Session()
         self.session.cookies.update(cookies)
         self.session.headers.update({
             'user-agent': pyuseragents.random(),
             'Authorization': DataManager.bearer,
-            'x-csrf-token': cookies['ct0'],
+            'x-csrf-token': cookies.get('ct0'),
             'Origin': 'https://mobile.twitter.com',
             'Referer': 'https://mobile.twitter.com/',
             'x-twitter-active-user': 'yes',
